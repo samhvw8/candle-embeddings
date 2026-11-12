@@ -1,0 +1,42 @@
+[package]
+name = "encoder"
+version = "0.1.0"
+edition = "2024"
+description = "Image and text embedding encoders in candle: a small Encoder trait, shared transformer blocks, and the EmbeddingGemma 2 family"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/samhvw8/encoder"
+readme = "README.md"
+authors = ["Sam Hoang"]
+keywords = ["embeddings", "candle", "gemma", "metal", "cuda"]
+categories = ["science", "multimedia::images"]
+exclude = ["bench/gemma/images", "bench/gemma/ref"]
+
+[features]
+default = []
+# The CUDA device. Metal needs no feature: it is part of every macOS build.
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+# FlashAttention-2 for bf16/f16 attention on CUDA (sm_80+ kernels; builds with nvcc, needs
+# CUDA_COMPUTE_CAP and network for CUTLASS). f32 keeps the exact plain path.
+flash-attn = ["cuda", "dep:candle-flash-attn"]
+# Download a model that is not in the local Hugging Face cache (hf-hub; adds a TLS/HTTP stack).
+download = ["dep:hf-hub"]
+
+[dependencies]
+candle-core = "0.11.1"
+candle-nn = "0.11.1"
+candle-flash-attn = { version = "0.11.1", optional = true }
+safetensors = "0.8.0"
+half = "2.7.1"
+tokenizers = "0.23.2"
+hf-hub = { version = "1.0.0", features = ["blocking"], optional = true }
+image = "0.25.10"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+anyhow = "1.0.104"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+candle-core = { version = "0.11.1", features = ["metal"] }
+candle-nn = { version = "0.11.1", features = ["metal"] }
+
+[profile.release]
+debug = 1

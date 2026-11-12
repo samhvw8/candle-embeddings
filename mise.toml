@@ -1,0 +1,21 @@
+[tools]
+rust = "1.99.1"
+# bench/gemma/reference.py (uv run --script)
+uv = "latest"
+
+[tasks.check]
+description = "Format check, clippy (default and download features) and tests"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy --all-targets -- -D warnings",
+  "cargo clippy --all-targets --features download -- -D warnings",
+  "cargo test",
+]
+
+[tasks.test]
+description = "Run the tests (the parity test skips when the model or the fixtures are missing)"
+run = "cargo test"
+
+[tasks.exact]
+description = "Exactness gate against the reference outputs (needs the cached model and bench/gemma/ref)"
+run = "cargo test --release --test embeddinggemma2 -- --ignored"

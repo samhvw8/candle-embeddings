@@ -1,0 +1,14 @@
+encoder
+Copyright (c) 2026 Sam Hoang
+Licensed under MIT OR Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE).
+
+This crate runs EmbeddingGemma 2 (google/embeddinggemma-2). It ships no model
+weights: the weights are downloaded separately and are subject to Google's
+Gemma terms of use (https://ai.google.dev/gemma/terms). The model architecture
+follows the reference implementation in Hugging Face transformers
+(Apache-2.0), which the parity tests compare against
+(bench/gemma/reference.py).
+
+The parity test images that bench/gemma/reference.py writes are scikit-image
+sample data (public domain / CC0); they are generated, not stored in this
+repository.
