@@ -8,9 +8,11 @@ the CPU.
 - **Same vectors as the official pipeline.** In f32, on 15 test images and 26 text inputs, the
   minimum cosine against sentence-transformers is 1.000000 on Metal and on the CPU
   ([parity](.okf/design/embeddinggemma2.md#parity)).
-- **Faster than sentence-transformers on the same GPU**, in every setting measured. RTX 3060, bf16
-  with FlashAttention-2: **10.31 images/s** at batch 8, against 9.25
-  ([recipe, step 5](.okf/recipes/adding-an-encoder-family.md#stage-1-speed-in-order)).
+- **Up to 1.8x faster than sentence-transformers** on the same GPU, and faster in every setting
+  measured. RTX 3060, bf16: 9.67 images/s against 5.41 at batch 1, 10.31 against 9.25 at batch 8
+  ([benchmarks](#benchmarks)).
+- **Fits a 16 GB Mac.** At batch 8, encoder peaks at 3.75 GB on Metal; sentence-transformers on MPS
+  runs out of memory.
 - **No network by default.** It reads models from the local Hugging Face cache. Downloading is an
   opt-in feature.
 
@@ -101,9 +103,10 @@ On an RTX 3060, bf16 with FlashAttention-2 gave a minimum image cosine of 0.9998
 
 ## Benchmarks
 
-Baseline: sentence-transformers, the official EmbeddingGemma 2 pipeline, on the same GPU and the same
-public test images. End to end: decode, preprocess and model. **Images per second, higher is
-better**, at batch 1 / batch 8.
+encoder embeds images 1.03x to 1.79x faster than sentence-transformers, the official pipeline, on
+every GPU and dtype measured, with the same vectors. Setup: the same GPU and public test images,
+end to end (decode, preprocess, model). **Images per second, higher is better**, at batch 1 /
+batch 8.
 
 | Hardware, dtype | Baseline: sentence-transformers | encoder | encoder is faster by | Source |
 |---|---|---|---|---|
@@ -111,20 +114,20 @@ better**, at batch 1 / batch 8.
 | RTX 3060, f32 | 2.85 / 3.17 | **3.24 / 3.28** | **1.14x / 1.03x** | [throughput](.okf/design/embeddinggemma2.md#throughput) |
 | M1 Pro, f32 | 0.98 / out of memory (MPS); 0.16 / 0.21 (CPU) | **1.43 / 1.45** (Metal) | **1.46x** / runs where MPS does not | [throughput](.okf/design/embeddinggemma2.md#throughput) |
 
-What we improved over the baseline:
+Against the baseline:
 
-- **Speed on CUDA.** FlashAttention-2 in the vision tower took bf16 from 3.79 / 3.86 to
-  9.67 / 10.31 images/s (2.55x / 2.67x), and cut peak GPU memory at batch 8 from 3.35 to 0.98 GiB
-  ([recipe, step 5](.okf/recipes/adding-an-encoder-family.md#stage-1-speed-in-order)).
-- **Memory on a 16 GB Mac.** At batch 8 in f32, encoder peaks at 3.75 GB. sentence-transformers on
-  MPS reaches 11.9 GB, swaps, and runs out of memory ([throughput](.okf/design/embeddinggemma2.md#throughput)).
-- **Same vectors.** In f32 the minimum cosine against the baseline is 1.000000
-  ([parity](.okf/design/embeddinggemma2.md#parity)).
+- **Memory:** 3.75 GB peak at batch 8 in f32 on an M1 Pro. sentence-transformers on MPS reaches
+  11.9 GB, swaps and runs out of memory ([throughput](.okf/design/embeddinggemma2.md#throughput)).
+- **Vectors:** identical in f32, minimum cosine 1.000000 ([parity](.okf/design/embeddinggemma2.md#parity)).
 
-The lead shrinks as the batch grows. From batch 1 to 8, sentence-transformers bf16 gains 71% and
-encoder gains 7%: one image (about 2,300 tokens) already fills the GPU for encoder. Batches above 8
-are not measured. Other processes shared the M1 Pro GPU during the runs, so treat its rates as a
-floor. The vision tower takes about 90% of the time.
+Where the CUDA lead comes from: FlashAttention-2 in the vision tower. It took encoder's own bf16 path
+from 3.79 / 3.86 to 9.67 / 10.31 images/s, and cut its peak GPU memory at batch 8 from 3.35 to
+0.98 GiB ([recipe, step 5](.okf/recipes/adding-an-encoder-family.md#stage-1-speed-in-order)).
+
+**Large batches narrow the gap.** From batch 1 to 8, sentence-transformers bf16 gains 71% and
+encoder gains 7%, because one image (about 2,300 tokens) already fills the GPU for encoder. Batches
+above 8 are not measured. Other processes shared the M1 Pro GPU during its runs, so treat those
+rates as a floor.
 
 ## Cargo features
 
