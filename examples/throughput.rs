@@ -1,6 +1,6 @@
 //! Images per second for one device / dtype / batch size, on the bench images cycled to `n`.
 //!
-//! /usr/bin/time -l target/.../examples/throughput metal f32 4 60   (metal|cuda|cpu)
+//! /usr/bin/time -l target/.../examples/throughput metal f32 4 60 [soft tokens]   (metal|cuda|cpu)
 //!
 //! Prints the rate for embedding from files (decode + preprocess + model) after one warm-up batch.
 
@@ -10,7 +10,9 @@ use std::time::Instant;
 use anyhow::{Result, bail};
 use candle_core::{DType, Device};
 use candle_embeddings::Encoder;
-use candle_embeddings::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, preprocess};
+use candle_embeddings::families::embeddinggemma2::{
+    EmbeddingGemma2, MAX_SOFT_TOKENS, MODEL_ID, preprocess_with,
+};
 use candle_embeddings::open_image;
 
 fn main() -> Result<()> {
@@ -29,6 +31,11 @@ fn main() -> Result<()> {
     };
     let batch: usize = args.get(3).map(|s| s.parse()).transpose()?.unwrap_or(4);
     let n: usize = args.get(4).map(|s| s.parse()).transpose()?.unwrap_or(60);
+    let budget: usize = args
+        .get(5)
+        .map(|s| s.parse())
+        .transpose()?
+        .unwrap_or(MAX_SOFT_TOKENS);
 
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("bench/gemma/images");
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)?
@@ -45,14 +52,16 @@ fn main() -> Result<()> {
     let paths: Vec<PathBuf> = files.iter().cycle().take(n).cloned().collect();
 
     let t = Instant::now();
-    let emb = EmbeddingGemma2::load_with(MODEL_ID, &device, dtype)?.with_batch_size(batch);
+    let emb = EmbeddingGemma2::load_with(MODEL_ID, &device, dtype)?
+        .with_batch_size(batch)
+        .with_max_soft_tokens(budget)?;
     let load = t.elapsed().as_secs_f64();
     emb.embed_image_paths(&paths[..batch.min(n)], None)?;
 
     let t = Instant::now();
     let pre: Vec<_> = paths
         .iter()
-        .map(|p| preprocess(&open_image(p)?))
+        .map(|p| preprocess_with(&open_image(p)?, budget))
         .collect::<Result<_>>()?;
     let pre_s = t.elapsed().as_secs_f64();
 
@@ -61,7 +70,7 @@ fn main() -> Result<()> {
     let model_s = t.elapsed().as_secs_f64();
     assert_eq!(out.len(), n);
     println!(
-        "device {:?} dtype {dtype:?} batch {batch} n {n}: load {load:.1}s, preprocess {:.1} img/s, model {:.2} img/s, end-to-end {:.2} img/s",
+        "device {:?} dtype {dtype:?} batch {batch} n {n} soft tokens {budget}: load {load:.1}s, preprocess {:.1} img/s, model {:.2} img/s, end-to-end {:.2} img/s",
         if device.is_metal() {
             "metal"
         } else if device.is_cuda() {

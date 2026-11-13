@@ -7,7 +7,7 @@ tags: [embedding, embeddinggemma, encoder-family, candle, metal, parity, benchma
 status: draft
 generated:
   by: claude-code/claude-opus-5-5
-  at: '2026-11-12T22:00:00Z'
+  at: '2026-11-13T12:30:00Z'
 sources:
   - id: hf-repo
     resource: https://huggingface.co/google/embeddinggemma-2/tree/914f7f89142e33e77833254d9c9b90c3cef7303b
@@ -27,6 +27,9 @@ sources:
   - id: candle-gemma4
     resource: https://docs.rs/crate/candle-transformers/0.11.1/source/src/models/gemma4/
     title: candle-transformers 0.11.1 models/gemma4
+  - id: budget-runs
+    resource: bench/gemma/reference.py --max-soft-tokens N, examples/parity.rs and examples/throughput.rs
+    title: Vision token budget runs of 2026-11-13 (public test images, M1 Pro, Metal f32, batch 1, 3 interleaved rounds)
   - id: runs
     resource: bench/gemma/reference.py
     title: reference.py output (bench/gemma/images and bench/gemma/ref, gitignored) and the parity / throughput example runs of 2026-11-12
@@ -50,7 +53,8 @@ let v: Vec<Vec<f32>> = emb.embed_image_paths(&paths, None)?;          // 768-d u
 let t = emb.embed_texts(&["a cat"], Some(prompts::SEARCH_QUERY))?;
 ```
 
-Other entry points: `load_with(model, device, dtype)`, `with_batch_size(n)`, and from the `Encoder`
+Other entry points: `load_with(model, device, dtype)`, `with_batch_size(n)`, `with_max_soft_tokens(n)`
+(vision token budget, default 280), and from the `Encoder`
 trait `embed_images(&[DynamicImage], prompt)`, `embed_preprocessed(&[Patches], prompt)` (already
 preprocessed). Family functions: `preprocess(&DynamicImage)`, `soft_tokens(&Patches)`,
 `resolve_model_dir` / `cached_model_dir` (the local Hugging Face cache at the pinned revision through
@@ -69,7 +73,7 @@ An image without a prompt becomes, token by token:[^tf-eg2]
 | N+2 | 258882 | `<image\|>` (eoi) |
 | N+3 | 1 | `<eos>` |
 
-N = (grid_h / 3) x (grid_w / 3) <= 280, so N depends on the aspect ratio (a 512x512 image gives 256, a
+N = (grid_h / 3) x (grid_w / 3) <= 280 (the default budget), so N depends on the aspect ratio (a 512x512 image gives 256, a
 451x300 one 260). `EmbeddingGemma2Processor.replace_image_token` expands the placeholder; the
 tokenizer's template adds bos and eos. The mean pool runs over all N + 4 positions. This crate
 builds the same string and tokenizes it, and the parity run checks the ids against the reference for
@@ -98,6 +102,12 @@ is installed):[^tf-gemma4]
    thumbnail).
 4. `x / 255`, no mean/std; patches row-major, each flattened as (py, px, channel). The vision tower
    maps to [-1, 1] itself.
+
+The `280` is the vision token budget, `image_processor.max_soft_tokens` in `processor_config.json`.
+`Gemma4ImageProcessor` accepts 70, 140, 280, 560 or 1120 (`_SUPPORTED_SOFT_TOKENS`) and the model card
+offers "soft token amounts ranging from 70 to 1120"; the repo's own video processor uses 140 per frame.
+The vision tower takes any budget: the pooler's output length is `patches / 9` and the position table
+has 10240 rows per axis. `with_max_soft_tokens(n)` sets it (see [Vision token budget](#vision-token-budget)).[^tf-gemma4]
 
 # Model
 
@@ -212,10 +222,33 @@ sentence-transformers CUDA 2.85 / 3.17; on the M1 Pro candle Metal 1.43 / 1.45 v
 MPS 0.98 / out of memory at batch 8 (11.9 GB footprint, swapping) and CPU 0.16 / 0.21. bf16 on CUDA:
 [recipe](/recipes/adding-an-encoder-family.md), steps 3-5.
 
+# Vision token budget
+
+`EmbeddingGemma2::with_max_soft_tokens(n)` (n in `SUPPORTED_SOFT_TOKENS`, default 280) makes
+`preprocess` resize to at most `n x 9` patches, so the vision tower runs on fewer tokens. A budget
+other than 280 gives different vectors: an index must use one budget for every image, and the text
+side is unchanged. Measured on the 15 test images, Metal f32, batch 1, 32 images per run, median of 3
+interleaved rounds, fresh process each:[^budget-runs]
+
+| soft tokens | patches (512x512) | model images/s | end to end | x vs 280 | cosine vs 280 min / median | parity vs transformers (min cos) | retrieval (reference) |
+|---|---|---|---|---|---|---|---|
+| 70 | 576 | 6.65 | 6.38 | 4.3x | 0.9285 / 0.9593 | 1.000000 (max diff 6.9e-7) | 14/15 (14/15) |
+| 140 | 1089 | 3.27 | 3.18 | 2.1x | 0.9486 / 0.9759 | 1.000000 (max diff 6.9e-7) | 14/15 (14/15) |
+| 280 | 2304 | 1.55 | 1.52 | 1.0x | 1 | 1.000000 (max diff 1.2e-6) | 13/15 (13/15) |
+
+Parity at 70 and 140 is against `reference.py --max-soft-tokens N` (fixtures in `bench/gemma/soft<N>`):
+token ids identical, pixels 0/255. `cargo run --release --example parity -- metal f32 1 70` also
+prints the cosine to the 280-token reference. The time scales with the patch count (attention over
+~2300 tokens costs more than linear), so 70 is a bit more than 4x. The retrieval check has 15 easy
+captions: 70 misses the tall rocket, 140 the logo, 280 both, so it does not rank the budgets. The
+cosines to 280 (0.93 to 0.99) say the vectors move enough that retrieval quality has to be measured
+on real data before a smaller budget is used; 560 and 1120 are accepted but not measured.
+
 [^hf-repo]: `modules.json`, `1_Pooling/config.json`, `config.json` of the pinned revision.
 [^model-card]: Model card, "Task Instruction Prefixes" and "Numerical Precision".
 [^tf-eg2]: `processing_embedding_gemma2.py` (`replace_image_token`) and `modeling_embedding_gemma2.py`.
-[^tf-gemma4]: `image_processing_gemma4.py` (`Gemma4ImageProcessor._preprocess`, `get_aspect_ratio_preserving_size`).
+[^tf-gemma4]: `image_processing_gemma4.py` (`Gemma4ImageProcessor._preprocess`, `get_aspect_ratio_preserving_size`, `_SUPPORTED_SOFT_TOKENS` at line 29); `modeling_gemma4.py` (`Gemma4VisionModel.forward`: `output_length = pixel_values.shape[-2] // pooling_kernel_size**2`; `Gemma4VisionPooler`).
+[^budget-runs]: Runs of 2026-11-13 on the M1 Pro, through a low-priority runner that waits for an idle CPU; the reference at each budget on CPU f32.
 [^torch-upsample]: `_compute_indices_min_size_weights_aa`, `_compute_index_ranges_int16_weights`, `basic_loop_aa_horizontal<uint8_t>`.
 [^candle-gemma4]: `vision.rs` (`RmsNorm::forward` adds 1.0 to the weight), `text.rs` (causal decoder with KV cache).
 [^runs]: `bench/gemma/reference.py`; outputs in `bench/gemma/ref/` (gitignored).

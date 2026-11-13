@@ -1,7 +1,7 @@
 //! EmbeddingGemma 2 (`google/embeddinggemma-2`) image and text embeddings.
 //!
 //! An image becomes the token sequence `<bos> <|image> <|image|> x N <image|> <eos>`, where the N
-//! placeholder rows (N = soft tokens, at most 280) are replaced by the vision tower's output. Text is
+//! placeholder rows (N = soft tokens, at most the budget: 280 by default) are replaced by the vision tower's output. Text is
 //! `<bos> prompt + text <eos>`. The text encoder runs bidirectionally over the sequence and projects
 //! every token to 768-d; the core then takes the mean over all tokens and L2-normalizes — the
 //! sentence-transformers pipeline (Transformer -> Pooling(mean) -> Normalize) of the model repo.
@@ -30,7 +30,10 @@ use crate::weights::{Checkpoint, TokenTable, model_dir};
 use crate::{Encoder, Hidden, Pooling};
 
 pub use config::Config;
-pub use preprocess::{PATCH_DIM, PATCH_SIZE, preprocess, soft_tokens};
+pub use preprocess::{
+    MAX_SOFT_TOKENS, PATCH_DIM, PATCH_SIZE, SUPPORTED_SOFT_TOKENS, preprocess, preprocess_with,
+    soft_tokens,
+};
 
 /// Output width.
 pub const EMBED_DIM: usize = 768;
@@ -72,6 +75,7 @@ pub struct EmbeddingGemma2 {
     vision: vision::VisionTower,
     text: text::TextEncoder,
     batch_size: usize,
+    max_soft_tokens: usize,
 }
 
 impl EmbeddingGemma2 {
@@ -135,6 +139,7 @@ impl EmbeddingGemma2 {
             vision,
             text,
             batch_size: DEFAULT_BATCH_SIZE,
+            max_soft_tokens: MAX_SOFT_TOKENS,
         })
     }
 
@@ -142,6 +147,19 @@ impl EmbeddingGemma2 {
     pub fn with_batch_size(mut self, n: usize) -> Self {
         self.batch_size = n.max(1);
         self
+    }
+
+    /// Vision token budget per image for [`Encoder::preprocess`] (one of [`SUPPORTED_SOFT_TOKENS`];
+    /// default [`MAX_SOFT_TOKENS`], 280). A smaller budget resizes images to fewer patches: faster,
+    /// and the vectors move away from the 280-token ones, so do not mix budgets in one index.
+    pub fn with_max_soft_tokens(mut self, n: usize) -> Result<Self> {
+        preprocess::check_budget(n)?;
+        self.max_soft_tokens = n;
+        Ok(self)
+    }
+
+    pub fn max_soft_tokens(&self) -> usize {
+        self.max_soft_tokens
     }
 
     /// The token ids of one image input (exposed for parity tests).
@@ -294,7 +312,7 @@ impl Encoder for EmbeddingGemma2 {
     }
 
     fn preprocess(&self, img: &DynamicImage) -> Result<Patches> {
-        preprocess(img)
+        preprocess_with(img, self.max_soft_tokens)
     }
 
     fn forward_images(&self, batch: &[Patches], prompt: Option<&str>) -> Result<Hidden> {

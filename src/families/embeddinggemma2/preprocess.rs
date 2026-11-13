@@ -4,7 +4,8 @@
 //! 2. Resize with the core's uint8 bicubic + antialias, keeping the aspect ratio, to the largest size
 //!    whose sides are multiples of `patch * pooling` (48 px) and that yields at most
 //!    `max_soft_tokens * pooling^2` patches (`get_aspect_ratio_preserving_size`, the part that is
-//!    this family's own).
+//!    this family's own). `max_soft_tokens` is the vision token budget: 280 by default
+//!    (`processor_config.json`), or another of [`SUPPORTED_SOFT_TOKENS`].
 //! 3. Rescale to `[0, 1]` (no mean/std normalization; the vision tower maps to `[-1, 1]` itself).
 //! 4. Cut into 16x16 patches, row-major, each flattened as `(py, px, channel)`.
 
@@ -15,7 +16,11 @@ use crate::preprocess::{Patches, patchify, resize_bicubic_aa};
 
 pub const PATCH_SIZE: usize = 16;
 pub const POOLING_KERNEL: usize = 3;
+/// The model's default vision token budget (`image_processor.max_soft_tokens` in `processor_config.json`).
 pub const MAX_SOFT_TOKENS: usize = 280;
+/// Budgets `Gemma4ImageProcessor` accepts (`_SUPPORTED_SOFT_TOKENS`, transformers 5.22.2). The model
+/// card: "soft token amounts ranging from 70 to 1120"; fewer tokens trade quality for speed.
+pub const SUPPORTED_SOFT_TOKENS: [usize; 5] = [70, 140, 280, 560, 1120];
 pub const PATCH_DIM: usize = 3 * PATCH_SIZE * PATCH_SIZE;
 
 /// Soft tokens the vision tower yields for an image (one per 3x3 patch block). Fails on a patch grid
@@ -33,6 +38,14 @@ pub fn soft_tokens(p: &Patches) -> Result<usize> {
         );
     }
     Ok(p.num_patches() / (POOLING_KERNEL * POOLING_KERNEL))
+}
+
+/// Fails on a budget the image processor rejects.
+pub fn check_budget(max_soft_tokens: usize) -> Result<()> {
+    if !SUPPORTED_SOFT_TOKENS.contains(&max_soft_tokens) {
+        bail!("max_soft_tokens must be one of {SUPPORTED_SOFT_TOKENS:?}, got {max_soft_tokens}");
+    }
+    Ok(())
 }
 
 /// `get_aspect_ratio_preserving_size` from transformers. Returns `(height, width)` in pixels.
@@ -68,7 +81,9 @@ pub fn preprocess(img: &DynamicImage) -> Result<Patches> {
     preprocess_with(img, MAX_SOFT_TOKENS)
 }
 
+/// Preprocess one image with a vision token budget from [`SUPPORTED_SOFT_TOKENS`].
 pub fn preprocess_with(img: &DynamicImage, max_soft_tokens: usize) -> Result<Patches> {
+    check_budget(max_soft_tokens)?;
     let rgb = img.to_rgb8();
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
     if w == 0 || h == 0 {
@@ -104,6 +119,41 @@ mod tests {
             let (th, tw) = target_size(h, w, MAX_SOFT_TOKENS).unwrap();
             assert_eq!((tw / PATCH_SIZE, th / PATCH_SIZE), (gw, gh), "{w}x{h}");
         }
+    }
+
+    #[test]
+    fn smaller_budgets_match_reference() {
+        // (w, h) -> grid (w, h) at 70 and 140 soft tokens, from `reference.py --max-soft-tokens N`.
+        let cases = [
+            ((512, 512), (24, 24), (33, 33)),
+            ((451, 300), (30, 18), (42, 27)),
+            ((1000, 872), (24, 21), (36, 33)),
+            ((384, 191), (33, 15), (48, 24)),
+            ((600, 150), (48, 12), (69, 15)),
+            ((380, 30), (87, 6), (126, 9)),
+            ((90, 1200), (6, 90), (9, 129)),
+            ((64, 48), (27, 21), (39, 30)),
+        ];
+        for ((w, h), g70, g140) in cases {
+            for (budget, (gw, gh)) in [(70, g70), (140, g140)] {
+                let (th, tw) = target_size(h, w, budget).unwrap();
+                assert_eq!(
+                    (tw / PATCH_SIZE, th / PATCH_SIZE),
+                    (gw, gh),
+                    "{w}x{h} @ {budget}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn budget_must_be_a_supported_one() {
+        let img = DynamicImage::new_rgb8(96, 96);
+        for b in SUPPORTED_SOFT_TOKENS {
+            preprocess_with(&img, b).unwrap();
+        }
+        assert!(preprocess_with(&img, 100).is_err());
+        assert!(preprocess_with(&img, 0).is_err());
     }
 
     #[test]

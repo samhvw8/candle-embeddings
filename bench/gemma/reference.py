@@ -22,10 +22,17 @@ Runs the official sentence-transformers path on CPU in float32 and writes:
   ref/texts_<prompt>.f32   text embeddings per prompt
 
 Usage: uv run --script bench/gemma/reference.py   (run from the repo root)
+
+With `--max-soft-tokens N` (70, 140, 560 or 1120; the model's default is 280) the image processor
+runs at that vision token budget, and the outputs go to `soft<N>/ref/` with image paths relative to
+`soft<N>/`, so the same exactness harness reads them (fixtures dir `bench/gemma/soft<N>`). Text
+vectors do not depend on the budget; they are copied from `ref/` when it exists.
 """
 
+import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -91,11 +98,22 @@ def make_images() -> None:
         IMAGES[name] = (None, caption)
 
 
+DEFAULT_SOFT_TOKENS = 280
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--max-soft-tokens", type=int, default=DEFAULT_SOFT_TOKENS)
+    budget = ap.parse_args().max_soft_tokens
     torch.set_num_threads(int(os.environ.get("REF_THREADS", "4")))
     make_images()
-    REF_DIR.mkdir(parents=True, exist_ok=True)
-    (REF_DIR / "pixels").mkdir(exist_ok=True)
+    if budget == DEFAULT_SOFT_TOKENS:
+        fixtures, ref_dir = HERE, REF_DIR
+    else:
+        fixtures = HERE / f"soft{budget}"
+        ref_dir = fixtures / "ref"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    (ref_dir / "pixels").mkdir(exist_ok=True)
 
     from sentence_transformers import SentenceTransformer
 
@@ -110,6 +128,9 @@ def main() -> None:
     print(f"loaded in {time.time() - t0:.1f}s; dtype {next(model.parameters()).dtype}", flush=True)
     processor = model[0].processor
     print("image processor:", type(processor.image_processor).__name__, flush=True)
+    # The vision token budget: Gemma4ImageProcessor.max_soft_tokens, one of (70, 140, 280, 560, 1120).
+    processor.image_processor.max_soft_tokens = budget
+    print("max_soft_tokens:", processor.image_processor.max_soft_tokens, flush=True)
 
     names = list(IMAGES)
     img_meta = []
@@ -122,9 +143,12 @@ def main() -> None:
         pos = feats["image_position_ids"][0]
         valid = (pos != -1).all(dim=-1)
         patches = feats["pixel_values"][0][valid].to(torch.float32).numpy()
-        patches.astype("<f4").tofile(REF_DIR / "pixels" / f"{name}.f32")
+        patches.astype("<f4").tofile(ref_dir / "pixels" / f"{name}.f32")
         grid_w = int(pos[valid][:, 0].max()) + 1
         grid_h = int(pos[valid][:, 1].max()) + 1
+        # The budget took effect: padded to budget * 9 patches, at most budget soft tokens.
+        assert pos.shape[0] == budget * 9, (name, pos.shape)
+        assert len(ids) - 4 <= budget, (name, len(ids))
         with torch.no_grad():
             emb = model.encode([img], batch_size=1, convert_to_numpy=True, normalize_embeddings=False)[0]
         img_embs.append(emb.astype(np.float32))
@@ -132,7 +156,7 @@ def main() -> None:
         img_meta.append(
             {
                 "name": name,
-                "file": f"images/{name}.png",
+                "file": os.path.relpath(IMG_DIR / f"{name}.png", fixtures),
                 "size": [w, h],
                 "grid": [grid_w, grid_h],
                 "num_patches": int(valid.sum()),
@@ -142,31 +166,38 @@ def main() -> None:
             }
         )
         print(f"{name}: {w}x{h} -> grid {grid_w}x{grid_h}, {len(ids)} tokens", flush=True)
-    np.stack(img_embs).astype("<f4").tofile(REF_DIR / "images.f32")
-    (REF_DIR / "images.json").write_text(json.dumps(img_meta, indent=1))
+    np.stack(img_embs).astype("<f4").tofile(ref_dir / "images.f32")
+    (ref_dir / "images.json").write_text(json.dumps(img_meta, indent=1))
 
     captions = sorted({IMAGES[n][1] for n in IMAGES})
     texts = captions + EXTRA_TEXTS
-    text_meta = {"texts": texts, "prompts": PROMPTS, "input_ids": {}}
-    for key, prompt in PROMPTS.items():
-        with torch.no_grad():
-            embs = model.encode(texts, prompt=prompt, batch_size=2, convert_to_numpy=True)
-        embs.astype("<f4").tofile(REF_DIR / f"texts_{key}.f32")
-        feats = model.preprocess([prompt + t for t in texts[:1]])
-        text_meta["input_ids"][key] = feats["input_ids"][0].tolist()
-    (REF_DIR / "texts.json").write_text(json.dumps(text_meta, indent=1))
+    base_texts = REF_DIR / "texts.json"
+    if ref_dir != REF_DIR and base_texts.is_file() and json.loads(base_texts.read_text())["texts"] == texts:
+        for key in PROMPTS:
+            shutil.copy(REF_DIR / f"texts_{key}.f32", ref_dir / f"texts_{key}.f32")
+        shutil.copy(base_texts, ref_dir / "texts.json")
+        print("texts: copied from ref/ (they do not depend on the image budget)", flush=True)
+    else:
+        text_meta = {"texts": texts, "prompts": PROMPTS, "input_ids": {}}
+        for key, prompt in PROMPTS.items():
+            with torch.no_grad():
+                embs = model.encode(texts, prompt=prompt, batch_size=2, convert_to_numpy=True)
+            embs.astype("<f4").tofile(ref_dir / f"texts_{key}.f32")
+            feats = model.preprocess([prompt + t for t in texts[:1]])
+            text_meta["input_ids"][key] = feats["input_ids"][0].tolist()
+        (ref_dir / "texts.json").write_text(json.dumps(text_meta, indent=1))
 
     # Retrieval sanity check: each image's nearest caption.
     ie = np.stack(img_embs)
     ie /= np.linalg.norm(ie, axis=1, keepdims=True)
-    te = np.fromfile(REF_DIR / "texts_query.f32", dtype="<f4").reshape(len(texts), -1)
+    te = np.fromfile(ref_dir / "texts_query.f32", dtype="<f4").reshape(len(texts), -1)
     sims = ie @ te.T
     hits = 0
     for i, m in enumerate(img_meta):
         top = texts[int(sims[i].argmax())]
         hits += top == m["caption"]
         print(f"  {m['name']:12s} -> {top[:60]}", flush=True)
-    print(f"retrieval (query prompt): {hits}/{len(img_meta)} top-1", flush=True)
+    print(f"retrieval (query prompt, {budget} soft tokens): {hits}/{len(img_meta)} top-1", flush=True)
     print(f"done in {time.time() - t0:.1f}s", flush=True)
 
 

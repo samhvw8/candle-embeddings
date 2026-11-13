@@ -83,6 +83,7 @@ Other entry points:
 | `EmbeddingGemma2::load(model, &device)` | Load from a Hugging Face id or a local directory with `config.json`, `tokenizer.json` and `model.safetensors` |
 | `load_with(model, &device, dtype)` | Pick the dtype (see below) |
 | `with_batch_size(n)` | Set inputs per forward pass (default 1) |
+| `with_max_soft_tokens(n)` | Trade image detail for speed: 70, 140, 280 (default), 560 or 1120 tokens per image. 70 runs 4.3x faster on an M1 Pro; vectors differ from 280, so use one budget per index ([token budget](.okf/design/embeddinggemma2.md#vision-token-budget)) |
 | `embed_images(&[DynamicImage], prompt)` | Embed decoded images |
 | `preprocess(&img)`, then `embed_preprocessed(&[Patches], prompt)` | Preprocess on the CPU on another thread while the GPU runs the previous batch |
 | `candle_embeddings::open_image(path)` | Open an image and apply its EXIF orientation |
