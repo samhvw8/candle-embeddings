@@ -1,6 +1,6 @@
-# encoder
+# candle-embeddings
 
-Image and text embeddings in Rust, without Python. encoder runs **EmbeddingGemma 2**
+Image and text embeddings in Rust, without Python. candle-embeddings runs **EmbeddingGemma 2**
 (`google/embeddinggemma-2`) on [candle](https://github.com/huggingface/candle): images and texts
 become 768-d unit vectors in one shared space. It runs on Apple GPUs (Metal), NVIDIA GPUs (CUDA) or
 the CPU.
@@ -11,7 +11,7 @@ the CPU.
 - **Up to 1.8x faster than sentence-transformers** on the same GPU, and faster in every setting
   measured. RTX 3060, bf16: 9.67 images/s against 5.41 at batch 1, 10.31 against 9.25 at batch 8
   ([benchmarks](#benchmarks)).
-- **Fits a 16 GB Mac.** At batch 8, encoder peaks at 3.75 GB on Metal; sentence-transformers on MPS
+- **Fits a 16 GB Mac.** At batch 8, candle-embeddings peaks at 3.75 GB on Metal; sentence-transformers on MPS
   runs out of memory.
 - **No network by default.** It reads models from the local Hugging Face cache. Downloading is an
   opt-in feature.
@@ -38,7 +38,7 @@ the CPU.
 hf download google/embeddinggemma-2 --revision 914f7f89142e33e77833254d9c9b90c3cef7303b
 ```
 
-encoder reads `HF_HUB_CACHE`, else `$HF_HOME/hub` (default `~/.cache/huggingface/hub`). When the
+candle-embeddings reads `HF_HUB_CACHE`, else `$HF_HOME/hub` (default `~/.cache/huggingface/hub`). When the
 model is missing, the error names this command. To download on a cache miss instead, turn on the
 `download` feature.
 
@@ -46,8 +46,8 @@ model is missing, the error names this command. To download on a cache miss inst
 
 ```toml
 [dependencies]
-encoder = { git = "https://github.com/samhvw8/encoder" }                         # CPU, plus Metal on macOS
-# encoder = { git = "https://github.com/samhvw8/encoder", features = ["cuda"] }  # plus CUDA
+candle-embeddings = { git = "https://github.com/samhvw8/candle-embeddings" }               # CPU, plus Metal on macOS
+# candle-embeddings = { git = "https://github.com/samhvw8/candle-embeddings", features = ["cuda"] }  # plus CUDA
 candle-core = "0.11.1"                                                            # for Device
 ```
 
@@ -55,8 +55,8 @@ candle-core = "0.11.1"                                                          
 
 ```rust
 use candle_core::Device;
-use encoder::Encoder;
-use encoder::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
+use candle_embeddings::Encoder;
+use candle_embeddings::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let device = Device::new_metal(0)?; // or Device::Cpu, or Device::new_cuda(0)? (feature cuda)
@@ -85,7 +85,7 @@ Other entry points:
 | `with_batch_size(n)` | Set inputs per forward pass (default 1) |
 | `embed_images(&[DynamicImage], prompt)` | Embed decoded images |
 | `preprocess(&img)`, then `embed_preprocessed(&[Patches], prompt)` | Preprocess on the CPU on another thread while the GPU runs the previous batch |
-| `encoder::open_image(path)` | Open an image and apply its EXIF orientation |
+| `candle_embeddings::open_image(path)` | Open an image and apply its EXIF orientation |
 
 ## Choosing a dtype
 
@@ -103,12 +103,12 @@ On an RTX 3060, bf16 with FlashAttention-2 gave a minimum image cosine of 0.9998
 
 ## Benchmarks
 
-encoder embeds images 1.03x to 1.79x faster than sentence-transformers, the official pipeline, on
+candle-embeddings embeds images 1.03x to 1.79x faster than sentence-transformers, the official pipeline, on
 every GPU and dtype measured, with the same vectors. Setup: the same GPU and public test images,
 end to end (decode, preprocess, model). **Images per second, higher is better**, at batch 1 /
 batch 8.
 
-| Hardware, dtype | Baseline: sentence-transformers | encoder | encoder is faster by | Source |
+| Hardware, dtype | Baseline: sentence-transformers | candle-embeddings | Faster by | Source |
 |---|---|---|---|---|
 | RTX 3060, bf16 | 5.41 / 9.25 | **9.67 / 10.31** (with `flash-attn`) | **1.79x / 1.11x** | [recipe, step 5](.okf/recipes/adding-an-encoder-family.md#stage-1-speed-in-order) |
 | RTX 3060, f32 | 2.85 / 3.17 | **3.24 / 3.28** | **1.14x / 1.03x** | [throughput](.okf/design/embeddinggemma2.md#throughput) |
@@ -120,12 +120,12 @@ Against the baseline:
   11.9 GB, swaps and runs out of memory ([throughput](.okf/design/embeddinggemma2.md#throughput)).
 - **Vectors:** identical in f32, minimum cosine 1.000000 ([parity](.okf/design/embeddinggemma2.md#parity)).
 
-Where the CUDA lead comes from: FlashAttention-2 in the vision tower. It took encoder's own bf16 path
+Where the CUDA lead comes from: FlashAttention-2 in the vision tower. It took the crate's own bf16 path
 from 3.79 / 3.86 to 9.67 / 10.31 images/s, and cut its peak GPU memory at batch 8 from 3.35 to
 0.98 GiB ([recipe, step 5](.okf/recipes/adding-an-encoder-family.md#stage-1-speed-in-order)).
 
 **Large batches narrow the gap.** From batch 1 to 8, sentence-transformers bf16 gains 71% and
-encoder gains 7%, because one image (about 2,300 tokens) already fills the GPU for encoder. Batches
+candle-embeddings gains 7%, because one image (about 2,300 tokens) already fills the GPU for candle-embeddings. Batches
 above 8 are not measured. Other processes shared the M1 Pro GPU during its runs, so treat those
 rates as a floor.
 

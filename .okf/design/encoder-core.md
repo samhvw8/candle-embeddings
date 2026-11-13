@@ -19,7 +19,7 @@ sources:
 
 # Overview
 
-The `encoder` crate holds image and text embedding models in candle 0.11.1. It follows TensorFold's
+The `candle-embeddings` crate holds image and text embedding models in candle 0.11.1. It follows TensorFold's
 family pattern:[^tensorfold] a shared block is built once in the core; a model **family** writes only
 its config, weight map and layer graph, plus kernels for layers only it has; every family is exact
 against its reference on day one; and the [recipe](/recipes/adding-an-encoder-family.md) lists the

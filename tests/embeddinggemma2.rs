@@ -4,7 +4,7 @@
 //! `smoke` runs in `cargo test` when the model is in the HF cache and the reference files exist.
 //! Otherwise it skips and prints a `SKIPPED` line straight to stderr, which the test harness does
 //! not capture. `full_parity` is the stage-0 gate and is ignored; run it with
-//! `cargo test --release -p encoder --test embeddinggemma2 -- --ignored`.
+//! `cargo test --release -p candle-embeddings --test embeddinggemma2 -- --ignored`.
 //!
 //! Both run on Metal on macOS and fail when Metal is missing: a CPU run would not test the device
 //! production uses. `EMEANS_ENCODER_DEVICE=cpu` asks for the CPU on purpose.
@@ -12,9 +12,9 @@
 use std::path::Path;
 
 use candle_core::{DType, Device};
-use encoder::Encoder;
-use encoder::exact::{self, RefImage, Spec};
-use encoder::families::embeddinggemma2::{
+use candle_embeddings::Encoder;
+use candle_embeddings::exact::{self, RefImage, Spec};
+use candle_embeddings::families::embeddinggemma2::{
     EMBED_DIM, EmbeddingGemma2, MODEL_ID, cached_model_dir, prompts,
 };
 
@@ -50,7 +50,7 @@ fn device() -> Device {
 /// captures `eprintln!` of a passing test, so that would hide the skip.
 fn skipped(why: &str) {
     use std::io::Write;
-    let _ = writeln!(std::io::stderr(), "\nSKIPPED encoder test: {why}");
+    let _ = writeln!(std::io::stderr(), "\nSKIPPED candle-embeddings test: {why}");
 }
 
 fn load(dtype: DType) -> Option<EmbeddingGemma2> {

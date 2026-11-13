@@ -1,7 +1,7 @@
 ---
 type: Reference
-title: Getting started — encoder
-description: What the encoder library is, its module map, features, how to get the model and run the exactness gate, and where to read next.
+title: Getting started — candle-embeddings
+description: What the candle-embeddings library is, its module map, features, how to get the model and run the exactness gate, and where to read next.
 tags: [getting-started, embedding, candle, embeddinggemma-2]
 status: draft
 generated:
@@ -11,15 +11,15 @@ generated:
 
 # Overview
 
-`encoder` is one Rust crate that turns images and texts into embedding vectors with candle 0.11.1,
+`candle-embeddings` (library name `candle_embeddings`) is one Rust crate that turns images and texts into embedding vectors with candle 0.11.1,
 on Metal (every macOS build), CUDA (feature `cuda`) or the CPU. A small `Encoder` trait and shared
 transformer blocks live in the core; each model is a **family** under `src/families/`. The first
 family is EmbeddingGemma 2 (`google/embeddinggemma-2`, 768-d unit vectors), exact against the
 sentence-transformers reference in f32.
 
 ```rust
-use encoder::Encoder;
-use encoder::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
+use candle_embeddings::Encoder;
+use candle_embeddings::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
 let emb = EmbeddingGemma2::load(MODEL_ID, &Device::new_metal(0)?)?;
 let images = emb.embed_image_paths(&paths, None)?;
 let texts = emb.embed_texts(&["a cat"], Some(prompts::SEARCH_QUERY))?;

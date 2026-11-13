@@ -1,4 +1,4 @@
-# encoder
+# candle-embeddings
 
 Image and text embedding encoders in candle: the `Encoder` trait and shared blocks in the core,
 one module per model family under `src/families/`. First family: EmbeddingGemma 2. A public repo:

@@ -1,13 +1,13 @@
 //! EmbeddingGemma 2 against the Python reference, with per-input lines, on any device / dtype / batch.
 //!
-//! cargo run --release -p encoder --example parity -- [metal|cuda|cpu] [f32|bf16|f16] [batch]
+//! cargo run --release -p candle-embeddings --example parity -- [metal|cuda|cpu] [f32|bf16|f16] [batch]
 
 use std::path::Path;
 
 use anyhow::{Result, bail};
 use candle_core::{DType, Device};
-use encoder::exact::{self, Spec};
-use encoder::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
+use candle_embeddings::exact::{self, Spec};
+use candle_embeddings::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();

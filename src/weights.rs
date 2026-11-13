@@ -177,7 +177,7 @@ pub fn hub_cache_dir() -> Result<PathBuf> {
 fn cached_snapshot(owner: &str, name: &str, revision: &str, files: &[&str]) -> Result<PathBuf> {
     let model = format!("{owner}/{name}");
     let hint = format!(
-        "fetch it with `hf download {model} --revision {revision}`, or build encoder with the `download` feature"
+        "fetch it with `hf download {model} --revision {revision}`, or build candle-embeddings with the `download` feature"
     );
     let repo = hub_cache_dir()?.join(format!("models--{owner}--{name}"));
     ensure!(
@@ -244,7 +244,8 @@ mod tests {
     /// A fake cache: `refs/main` -> hash -> `snapshots/<hash>/` with the files.
     #[test]
     fn resolves_a_ref_and_a_hash_from_the_cache_layout() {
-        let root = std::env::temp_dir().join(format!("encoder-hfcache-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("candle-embeddings-hfcache-{}", std::process::id()));
         let repo = root.join("models--acme--tiny");
         let hash = "0123456789abcdef0123456789abcdef01234567";
         std::fs::create_dir_all(repo.join("refs")).unwrap();

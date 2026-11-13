@@ -43,8 +43,8 @@ text tower, the vision tower and `embed_vision` from the 1.4 GB safetensors file
 (`Transformer -> Pooling(mean, include_prompt) -> Normalize`).[^hf-repo]
 
 ```rust
-use encoder::Encoder;
-use encoder::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
+use candle_embeddings::Encoder;
+use candle_embeddings::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, prompts};
 let emb = EmbeddingGemma2::load(MODEL_ID, &Device::new_metal(0)?)?;  // f32, batch 1
 let v: Vec<Vec<f32>> = emb.embed_image_paths(&paths, None)?;          // 768-d unit vectors
 let t = emb.embed_texts(&["a cat"], Some(prompts::SEARCH_QUERY))?;
@@ -55,7 +55,7 @@ trait `embed_images(&[DynamicImage], prompt)`, `embed_preprocessed(&[Patches], p
 preprocessed). Family functions: `preprocess(&DynamicImage)`, `soft_tokens(&Patches)`,
 `resolve_model_dir` / `cached_model_dir` (the local Hugging Face cache at the pinned revision through
 `weights::model_dir`; a miss downloads only with the `download` feature, see
-[model cache](/decisions/model-cache.md)). `encoder::open_image(path)` applies EXIF orientation.
+[model cache](/decisions/model-cache.md)). `candle_embeddings::open_image(path)` applies EXIF orientation.
 
 # Input sequence
 

@@ -9,9 +9,9 @@ use std::time::Instant;
 
 use anyhow::{Result, bail};
 use candle_core::{DType, Device};
-use encoder::Encoder;
-use encoder::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, preprocess};
-use encoder::open_image;
+use candle_embeddings::Encoder;
+use candle_embeddings::families::embeddinggemma2::{EmbeddingGemma2, MODEL_ID, preprocess};
+use candle_embeddings::open_image;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
